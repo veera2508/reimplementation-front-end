@@ -34,6 +34,7 @@ const StudentTeamView: FC<StudentTeamsProps> = () => {
     fetchJoinTeamRequestsAPI,
     acceptJoinRequestAPI,
     declineJoinRequestAPI,
+    updateDutyAPI,
     fetchTeam,
     createTeam,
     updateName,
@@ -45,6 +46,8 @@ const StudentTeamView: FC<StudentTeamsProps> = () => {
     fetchJoinTeamRequests,
     acceptJoinRequest,
     declineJoinRequest
+    ,
+    updateDuty
   } = useStudentTeam(studentId);
 
   const [editMode, setEditMode] = useState(false);
@@ -64,6 +67,10 @@ const StudentTeamView: FC<StudentTeamsProps> = () => {
   const { error: leaveTeamError, data: leaveTeamResponse, reset: resetLeaveTeam } = leaveAPI;
   const { error: acceptJoinRequestError, data: acceptJoinRequestResponse, reset: resetAcceptJoinRequest } = acceptJoinRequestAPI;
   const { error: declineJoinRequestError, data: declineJoinRequestResponse, reset: resetDeclineJoinRequest } = declineJoinRequestAPI;
+  const { error: updateDutyError, data: updateDutyResponse, reset: resetUpdateDuty } = updateDutyAPI;
+
+  const assignmentDuties = team?.data?.assignment?.assignment_duties ?? [];
+  const showRoleSelection = assignmentDuties.length > 0 && !!team?.data?.assignment?.has_role_based_review;
 
   useEffect(() => {
     if (errorStatus != '403')
@@ -205,7 +212,12 @@ const StudentTeamView: FC<StudentTeamsProps> = () => {
       showFeedback(createTeamResponse)
     }
 
-  }, [updateNameResponse, sendInviteResponse, updateInviteResponse, leaveTeamResponse, createTeamResponse]);
+    if (updateDutyResponse) {
+      showFeedback(updateDutyResponse)
+      fetchTeam();
+    }
+
+  }, [updateNameResponse, sendInviteResponse, updateInviteResponse, leaveTeamResponse, createTeamResponse, updateDutyResponse]);
 
   const resetAllLogs = (error: boolean, data: boolean) => {
     resetCreateTeam?.(error, data);
@@ -215,6 +227,7 @@ const StudentTeamView: FC<StudentTeamsProps> = () => {
     resetUpdateInvite?.(error, data);
     resetAcceptJoinRequest?.(error, data);
     resetDeclineJoinRequest?.(error, data);
+    resetUpdateDuty?.(error, data);
   };
 
   // Combine all hook errors into one derived variable
@@ -226,6 +239,7 @@ const StudentTeamView: FC<StudentTeamsProps> = () => {
     updateInviteError ||
     acceptJoinRequestError ||
     declineJoinRequestError ||
+    updateDutyError ||
     null;
 
   useEffect(() => {
@@ -252,6 +266,10 @@ const StudentTeamView: FC<StudentTeamsProps> = () => {
       fetchTeam();
     }
   }, [createTeamResponse, leaveTeamResponse, updateInviteResponse, acceptJoinRequestResponse, declineJoinRequestResponse])
+
+  const handleDutyChange = async (participantId: number, dutyId: string) => {
+    await updateDuty(participantId, dutyId ? Number(dutyId) : null);
+  };
 
 
   if (isLoading)
@@ -347,6 +365,7 @@ const StudentTeamView: FC<StudentTeamsProps> = () => {
                 <th className={styles.studentTeamTableCellHeader}>Username</th>
                 <th className={styles.studentTeamTableCellHeader}>Name</th>
                 <th className={styles.studentTeamTableCellHeader}>Email address</th>
+                {showRoleSelection && <th className={styles.studentTeamTableCellHeader}>Role</th>}
                 <th className={styles.studentTeamTableCellHeader}>Review action</th>
               </tr>
             </thead>
@@ -357,6 +376,26 @@ const StudentTeamView: FC<StudentTeamsProps> = () => {
                     <td className={styles.studentTeamTableCell}>{participant.user.username}</td>
                     <td className={styles.studentTeamTableCell}>{participant.user.fullName}</td>
                     <td className={styles.studentTeamTableCell}>{participant.user.email}</td>
+                    {showRoleSelection && (
+                      <td className={styles.studentTeamTableCell}>
+                        {participant.id === Number(studentId) ? (
+                          <Form.Select
+                            aria-label="Select your role"
+                            value={participant.duty_id ?? ""}
+                            onChange={(e) => handleDutyChange(participant.id, e.target.value)}
+                          >
+                            <option value="">Select role</option>
+                            {assignmentDuties.map((duty: any) => (
+                              <option key={duty.duty_id} value={duty.duty_id}>
+                                {duty.duty_name}
+                              </option>
+                            ))}
+                          </Form.Select>
+                        ) : (
+                          participant.duty_name || "-"
+                        )}
+                      </td>
+                    )}
                     <td className={styles.studentTeamTableCell}>
                       {participant.id !== Number(studentId) && <Link to="/" className={styles.studentTeamButtonLink}>
                         Review
