@@ -4,7 +4,7 @@ import { Button, Modal } from "react-bootstrap";
 import { Form, Formik, FormikHelpers } from "formik";
 import { IAssignmentFormValues, transformAssignmentRequest } from "./AssignmentUtil";
 import { IEditor } from "../../utils/interfaces";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useLoaderData, useLocation, useNavigate, useParams } from "react-router-dom";
 import FormInput from "../../components/Form/FormInput";
@@ -51,6 +51,12 @@ interface TopicData {
   partnerAd?: any;
   createdAt?: string;
   updatedAt?: string;
+}
+
+interface AssignmentDutyConfig {
+  duty_id: number;
+  duty_name: string;
+  max_members_for_duty: number;
 }
 
 const initialValues: IAssignmentFormValues = {
@@ -124,6 +130,9 @@ const AssignmentEditor: React.FC<IEditor> = ({ mode }) => {
   const { data: assignmentDutiesResponse, error: assignmentDutiesError, sendRequest: fetchAssignmentDuties } = useAPI();
   const { error: addAssignmentDutyError, sendRequest: addAssignmentDuty } = useAPI();
   const { error: removeAssignmentDutyError, sendRequest: removeAssignmentDuty } = useAPI();
+  const { data: createDutyResponse, error: createDutyError, sendRequest: createDuty } = useAPI();
+  const { data: createDutyMappingResponse, error: createDutyMappingError, sendRequest: createDutyMapping } = useAPI();
+  const { data: deleteDutyMappingResponse, error: deleteDutyMappingError, sendRequest: deleteDutyMapping } = useAPI();
   const { data: updateDutyLimitResponse, error: updateDutyLimitError, sendRequest: updateDutyLimit } = useAPI();
 
  
@@ -134,6 +143,11 @@ const AssignmentEditor: React.FC<IEditor> = ({ mode }) => {
   );
   // authentication state not required in this editor
   const assignmentData: any = useLoaderData();
+  const [assignmentDuties, setAssignmentDuties] = useState<AssignmentDutyConfig[]>(assignmentData.assignment_duties || []);
+  const [accessibleDuties, setAccessibleDuties] = useState<any[]>([]);
+  const [selectedDutyId, setSelectedDutyId] = useState<string>("");
+  const [newDutyName, setNewDutyName] = useState<string>("");
+  const [showCreateRoleInline, setShowCreateRoleInline] = useState<boolean>(false);
 
   // Merge backend-loaded assignment data with frontend defaults:
   // for any field that is null/undefined in assignmentData, fall back to initialValues.
@@ -1008,6 +1022,85 @@ const AssignmentEditor: React.FC<IEditor> = ({ mode }) => {
                     ]}
                   />
                 </div>
+                <FormCheckbox controlId="assignment-review_rubric_varies_by_role" label="Is role based?" name="review_rubric_varies_by_role" />
+                {formik.values.review_rubric_varies_by_role && (
+                  <div style={{ marginTop: '10px', marginBottom: '12px' }}>
+                    <div style={{ border: '1px solid #d5dee8', backgroundColor: '#f7fafc', borderRadius: '8px', padding: '10px', marginBottom: '10px' }}>
+                      <div style={{ fontWeight: 600, marginBottom: '8px' }}>Assign existing role</div>
+                      <div style={{ display: 'flex', alignItems: 'center', columnGap: '8px' }}>
+                        <div style={{ width: '260px' }}>
+                          <select
+                            id="assignment-role-duty"
+                            value={selectedDutyId}
+                            onChange={(e) => setSelectedDutyId(e.target.value)}
+                            style={{ width: '100%', height: '38px', borderRadius: '4px', border: '1px solid #ced4da', padding: '0 8px' }}
+                          >
+                            <option value="">-- Select role --</option>
+                            {unassignedDuties.map((duty: any) => (
+                              <option key={duty.id} value={duty.id}>
+                                {duty.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <Button type="button" variant="outline-secondary" onClick={handleAddRoleDuty} disabled={!selectedDutyId}>
+                          Add Role to Assignment
+                        </Button>
+                      </div>
+                      {!showCreateRoleInline && (
+                        <button
+                          type="button"
+                          onClick={() => setShowCreateRoleInline(true)}
+                          style={{ marginTop: '8px', padding: 0, border: 'none', background: 'none', color: '#0d6efd', textDecoration: 'underline', cursor: 'pointer', transform: 'none', transition: 'none', lineHeight: 1.2, verticalAlign: 'baseline' }}
+                        >
+                          Create a new role
+                        </button>
+                      )}
+                    </div>
+
+                    {showCreateRoleInline && (
+                      <div style={{ border: '1px solid #d5dee8', backgroundColor: '#fffaf5', borderRadius: '8px', padding: '10px', marginBottom: '8px' }}>
+                        <div style={{ fontWeight: 600, marginBottom: '8px' }}>Create new role</div>
+                        <div style={{ display: 'flex', alignItems: 'center', columnGap: '8px' }}>
+                          <input
+                            id="assignment-create-role-duty"
+                            type="text"
+                            value={newDutyName}
+                            onChange={(e) => setNewDutyName(e.target.value)}
+                            placeholder="Role name"
+                            style={{ width: '260px', height: '38px', borderRadius: '4px', border: '1px solid #ced4da', padding: '0 8px' }}
+                          />
+                          <Button type="button" variant="outline-primary" onClick={handleCreateRoleDuty} disabled={!newDutyName.trim()}>
+                            Create Role
+                          </Button>
+                          <Button type="button" variant="outline-secondary" onClick={() => setShowCreateRoleInline(false)}>
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                    {assignmentDuties.length > 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', rowGap: '8px' }}>
+                        {assignmentDuties.map((duty) => (
+                          <div key={duty.duty_id} style={{ display: 'flex', alignItems: 'center', columnGap: '8px' }}>
+                            <div style={{ minWidth: '180px' }}>{duty.duty_name}</div>
+                            <label style={{ marginBottom: 0 }}>Max members:</label>
+                            <input
+                              type="number"
+                              min={1}
+                              defaultValue={duty.max_members_for_duty}
+                              style={{ width: '80px' }}
+                              onBlur={(e) => handleUpdateRoleLimit(duty.duty_id, Number(e.target.value))}
+                            />
+                            <Button type="button" variant="outline-danger" size="sm" onClick={() => handleRemoveRoleDuty(duty.duty_id)}>
+                              Remove
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
                 {formik.values.has_topics && (
                   <div style={{ display: 'flex', alignItems: 'center', columnGap: '10px' }}>
                     <label className="form-label">Review topic threshold (k):</label>
