@@ -320,15 +320,60 @@ const AssignmentEditor: React.FC<IEditor> = ({ mode }) => {
   }, [accessibleDutiesError, dispatch]);
 
   useEffect(() => {
+    if (createDutyResponse?.data) {
+      const createdDuty = createDutyResponse.data;
+      setAccessibleDuties((prev) => {
+        const alreadyExists = prev.some((duty: any) => duty.id === createdDuty.id);
+        if (alreadyExists) {
+          return prev;
+        }
+        return [...prev, createdDuty];
+      });
+      setSelectedDutyId(String(createdDuty.id));
+      setNewDutyName("");
+      setShowCreateRoleInline(false);
+      dispatch(alertActions.showAlert({ variant: "success", message: "Role created" }));
+      fetchAccessibleDuties({ url: "/duties/accessible_duties", method: HttpMethod.GET });
+    }
+  }, [createDutyResponse, dispatch, fetchAccessibleDuties]);
+
+  useEffect(() => {
+    if (createDutyError) {
+      dispatch(alertActions.showAlert({ variant: "danger", message: createDutyError }));
+    }
+  }, [createDutyError, dispatch]);
+
+  useEffect(() => {
+    if (createDutyMappingResponse?.data) {
+      setAssignmentDuties(createDutyMappingResponse.data || []);
+      setSelectedDutyId("");
+      dispatch(alertActions.showAlert({ variant: "success", message: "Role added to assignment" }));
+    }
+  }, [createDutyMappingResponse, dispatch]);
+
+  useEffect(() => {
+    if (createDutyMappingError) {
+      dispatch(alertActions.showAlert({ variant: "danger", message: createDutyMappingError }));
+    }
+  }, [createDutyMappingError, dispatch]);
+
+  useEffect(() => {
+    if (deleteDutyMappingResponse?.status === 204) {
+      dispatch(alertActions.showAlert({ variant: "success", message: "Role removed from assignment" }));
+    }
+  }, [deleteDutyMappingResponse, dispatch]);
+
+  useEffect(() => {
+    if (deleteDutyMappingError) {
+      dispatch(alertActions.showAlert({ variant: "danger", message: deleteDutyMappingError }));
+    }
+  }, [deleteDutyMappingError, dispatch]);
+
+  useEffect(() => {
     if (updateDutyLimitResponse?.data) {
       const updated = updateDutyLimitResponse.data;
       setAssignmentDuties((prev) =>
-        prev.map((duty) => {
-          const currentDutyId = duty.duty_id ?? duty.id;
-          return currentDutyId === updated.duty_id
-            ? { ...duty, max_members_for_duty: updated.max_members_for_duty }
-            : duty;
-        })
+        prev.map((duty) => (duty.duty_id === updated.duty_id ? { ...duty, max_members_for_duty: updated.max_members_for_duty } : duty))
       );
       dispatch(alertActions.showAlert({ variant: "success", message: "Role limit updated" }));
     }
@@ -422,60 +467,30 @@ const AssignmentEditor: React.FC<IEditor> = ({ mode }) => {
       setRoleBasedLocalError("Select at least one duty to add.");
       return;
     }
-
     setRoleBasedLocalError(null);
-
-    const previousAssignmentDuties = assignmentDuties;
-    const previousSelectedDutyIds = selectedDutyIds;
-    const optimisticDuties = accessibleDuties
-      .filter((duty: any) => selectedDutyIds.includes(duty.id))
-      .map((duty: any) => ({
-        duty_id: duty.id,
-        duty_name: duty.name,
-        max_members_for_duty: 1,
-      }));
-
-    setAssignmentDuties((prev) => {
-      const assignedIds = new Set(prev.map((duty: any) => duty.duty_id ?? duty.id));
-      return [...prev, ...optimisticDuties.filter((duty) => !assignedIds.has(duty.duty_id))];
-    });
+    await Promise.all(
+      selectedDutyIds.map((dutyId) =>
+        addAssignmentDuty({
+          url: `/assignments/${id}/duties`,
+          method: "POST",
+          data: { duty_id: dutyId },
+        })
+      )
+    );
     setSelectedDutyIds([]);
-
-    try {
-      await Promise.all(
-        selectedDutyIds.map((dutyId) =>
-          addAssignmentDuty({
-            url: `/assignments/${id}/duties`,
-            method: "POST",
-            data: { duty_id: dutyId },
-          })
-        )
-      );
-      refreshAssignmentDuties();
-    } catch (error) {
-      setAssignmentDuties(previousAssignmentDuties);
-      setSelectedDutyIds(previousSelectedDutyIds);
-    }
-  }, [accessibleDuties, addAssignmentDuty, assignmentDuties, id, refreshAssignmentDuties, selectedDutyIds]);
+    refreshAssignmentDuties();
+  }, [addAssignmentDuty, id, refreshAssignmentDuties, selectedDutyIds]);
 
   const handleRemoveDuty = useCallback(
     async (dutyId: number) => {
       if (!id) return;
-
-      const previousAssignmentDuties = assignmentDuties;
-      setAssignmentDuties((prev) => prev.filter((duty: any) => (duty.duty_id ?? duty.id) !== dutyId));
-
-      try {
-        await removeAssignmentDuty({
-          url: `/assignments/${id}/duties/${dutyId}`,
-          method: "DELETE",
-        });
-        refreshAssignmentDuties();
-      } catch (error) {
-        setAssignmentDuties(previousAssignmentDuties);
-      }
+      await removeAssignmentDuty({
+        url: `/assignments/${id}/duties/${dutyId}`,
+        method: "DELETE",
+      });
+      refreshAssignmentDuties();
     },
-    [assignmentDuties, id, refreshAssignmentDuties, removeAssignmentDuty]
+    [id, refreshAssignmentDuties, removeAssignmentDuty]
   );
      const handleTopicSettingChange = useCallback((setting: string, value: boolean) => {
         setTopicSettings((prev) => ({ ...prev, [setting]: value }));
@@ -717,6 +732,38 @@ const AssignmentEditor: React.FC<IEditor> = ({ mode }) => {
     .map((assignmentDuty: any) => assignmentDuty?.duty_name || assignmentDuty?.dutyName || assignmentDuty?.name)
     .filter(Boolean);
 
+  const unassignedDuties = useMemo(
+    () =>
+      accessibleDuties.filter(
+        (duty: any) => !assignmentDuties.some((assignedDuty) => assignedDuty.duty_id === duty.id)
+      ),
+    [accessibleDuties, assignmentDuties]
+  );
+
+  const handleAddRoleDuty = () => {
+    if (!id || !selectedDutyId) {
+      return;
+    }
+
+    createDutyMapping({
+      url: `/assignments/${id}/duties`,
+      method: HttpMethod.POST,
+      params: { duty_id: selectedDutyId },
+    });
+  };
+
+  const handleRemoveRoleDuty = (dutyId: number) => {
+    if (!id) {
+      return;
+    }
+
+    deleteDutyMapping({
+      url: `/assignments/${id}/duties/${dutyId}`,
+      method: HttpMethod.DELETE,
+    });
+    setAssignmentDuties((prev) => prev.filter((duty) => duty.duty_id !== dutyId));
+  };
+
   const handleUpdateRoleLimit = (dutyId: number, maxMembersForDuty: number) => {
     if (!id || Number.isNaN(maxMembersForDuty) || maxMembersForDuty < 1) {
       dispatch(alertActions.showAlert({ variant: "danger", message: "Max members per role must be at least 1" }));
@@ -727,6 +774,25 @@ const AssignmentEditor: React.FC<IEditor> = ({ mode }) => {
       url: `/assignments/${id}/duties/${dutyId}/limit`,
       method: HttpMethod.PATCH,
       data: { max_members_for_duty: maxMembersForDuty },
+    });
+  };
+
+  const handleCreateRoleDuty = () => {
+    const trimmedName = newDutyName.trim();
+    if (!trimmedName) {
+      dispatch(alertActions.showAlert({ variant: "danger", message: "Role name is required" }));
+      return;
+    }
+
+    createDuty({
+      url: "/duties",
+      method: HttpMethod.POST,
+      data: {
+        duty: {
+          name: trimmedName,
+          private: false,
+        },
+      },
     });
   };
 
@@ -865,7 +931,6 @@ const AssignmentEditor: React.FC<IEditor> = ({ mode }) => {
                 <div style={{ marginTop: '20px' }}></div>
                 <FormCheckbox controlId="assignment-review_rubric_varies_by_round" label="Review rubric varies by round?" name="review_rubric_varies_by_round" />
                 <FormCheckbox controlId="assignment-review_rubric_varies_by_topic" label="Review rubric varies by topic?" name="review_rubric_varies_by_topic" />
-                <FormCheckbox controlId="assignment-review_rubric_varies_by_role" label="Review rubrics by role?" name="review_rubric_varies_by_role" />
 
                 <div style={{ marginTop: '20px' }}>
                   <Table
@@ -1158,7 +1223,7 @@ const AssignmentEditor: React.FC<IEditor> = ({ mode }) => {
                         <div className="text-muted">No duties available.</div>
                       )}
                       {(() => {
-                        const assignedIds = new Set((assignmentDuties || []).map((d: any) => d.duty_id ?? d.id));
+                        const assignedIds = new Set((assignmentDuties || []).map((d: any) => d.id));
                         return (accessibleDuties || []).map((duty: any) => {
                           const isAssigned = assignedIds.has(duty.id);
                           return (
@@ -1195,26 +1260,15 @@ const AssignmentEditor: React.FC<IEditor> = ({ mode }) => {
                           <thead>
                             <tr>
                               <th>Name</th>
-                              <th style={{ width: '180px' }}>Max members</th>
                               <th style={{ width: '80px' }}>Action</th>
                             </tr>
                           </thead>
                           <tbody>
                             {(assignmentDuties || []).map((duty: any) => (
-                              <tr key={duty.duty_id ?? duty.id}>
-                                <td>{duty.duty_name ?? duty.name}</td>
+                              <tr key={duty.id}>
+                                <td>{duty.name}</td>
                                 <td>
-                                  <input
-                                    type="number"
-                                    min={1}
-                                    defaultValue={duty.max_members_for_duty ?? 1}
-                                    style={{ width: '100px' }}
-                                    onBlur={(e) => handleUpdateRoleLimit(duty.duty_id ?? duty.id, Number(e.target.value))}
-                                    disabled={!id}
-                                  />
-                                </td>
-                                <td>
-                                  <Button variant="link" onClick={() => handleRemoveDuty(duty.duty_id ?? duty.id)} aria-label="Delete Duty" className="p-0" disabled={!id}>
+                                  <Button variant="link" onClick={() => handleRemoveDuty(duty.id)} aria-label="Delete Duty" className="p-0" disabled={!id}>
                                     <img src={"/assets/images/delete-icon-24.png"} alt="Delete" style={{ width: 25, height: 20 }} />
                                   </Button>
                                 </td>
